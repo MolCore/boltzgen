@@ -1,0 +1,91 @@
+Bootstrap: docker
+From: nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export PIP_NO_CACHE_DIR=1
+    export PYTHONDONTWRITEBYTECODE=1
+    export PYTHONUNBUFFERED=1
+    export CUDA_HOME=/usr/local/cuda
+    export HF_HOME=/app/cache
+    export PATH=/usr/local/cuda/bin:/root/.cargo/bin:/root/.local/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+    # Activate UV virtual environment
+    source /app/.venv/bin/activate
+
+%files
+    # Copy boltzgen source code
+    /runtime/repos/boltzgen /app
+
+%post
+    # Install system dependencies
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-dev \
+        python3-pip \
+        python3-venv \
+        python3-wheel \
+        build-essential \
+        git \
+        curl \
+        ca-certificates \
+        cargo \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Set Python 3.11 as default
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+    # Install UV (matching local setup)
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+
+    # Create app directory and cache
+    mkdir -p /app
+    mkdir -p /app/cache
+    cd /app
+
+    # Use UV to create virtual environment (matching local .venv exactly)
+    uv python install 3.11
+    uv venv --python 3.11 .venv
+
+    # Activate virtual environment
+    source .venv/bin/activate
+
+    # Install pip in venv (same as local setup)
+    python -m ensurepip --upgrade || uv pip install pip
+    python -m pip install --upgrade pip setuptools wheel
+
+    # Install boltzgen in editable mode (same as local: pip install -e .)
+    # This uses pyproject.toml for exact dependency specifications
+    pip install --no-cache-dir -e /app
+
+    # Download models during build
+    echo "Downloading models (this may take a while)..."
+    boltzgen download all --cache /app/cache || {
+        echo "Warning: Model download failed during build. Models can be downloaded at runtime."
+    }
+
+    # Create data directory for mounts
+    mkdir -p /data
+
+%runscript
+    exec boltzgen "$@"
+
+%labels
+    Author boltzgen-testing
+    Version 0.1.2
+    Description boltzGen protein design pipeline container
+
+%help
+    This container provides the boltzGen protein design pipeline.
+    
+    Usage:
+        apptainer exec boltzgen.sif boltzgen run <yaml_file> --output <output_dir> --protocol <protocol>
+    
+    Mount points:
+        - /data: Working directory for inputs/outputs
+        - /app/cache: Model cache directory
+    
+    GPU support:
+        Use --nv flag: apptainer exec --nv boltzgen.sif ...

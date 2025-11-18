@@ -1,0 +1,14 @@
+# Test outputs
+outputs/
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
